@@ -400,7 +400,11 @@ class DMSTATUSFields extends Bundle {
   */
   val authbusy = Bool()
 
-  val reserved2 = UInt(1.W)
+  /* 1 if this debug module supports halt-on-reset functionality
+            controllable by the \Fsetresethaltreq and \Fclrresethaltreq bits.
+            0 otherwise.
+  */
+  val hasresethaltreq = Bool()
 
   /* 0: \Rdevtreeaddrzero--\Rdevtreeaddrthree hold information which
             is not relevant to the Device Tree.
@@ -468,19 +472,7 @@ class DMCONTROLFields extends Bundle {
   */
   val ackhavereset = Bool()
 
-  /* This optional field writes the halt-on-reset request bit for all
-            currently selected harts.
-            When set to 1, each selected hart will halt upon the next deassertion
-            of its reset. The halt-on-reset request bit is not automatically
-            cleared. The debugger must write 0 to this field to clear it.
-
-            If this feature is not implemented, the bit always stays 0, so
-            after writing 1 the debugger can read the register back to see if
-            the feature is supported.
-
-            Writes apply to the new value of \Fhartsel and \Fhasel.
-  */
-  val resethaltreq = Bool()
+  val reserved0 = UInt(1.W)
 
   /* Selects the  definition of currently selected harts.
 
@@ -506,7 +498,26 @@ class DMCONTROLFields extends Bundle {
   */
   val hartselhi = UInt(10.W)
 
-  val reserved0 = UInt(4.W)
+  val reserved1 = UInt(2.W)
+
+  /* This optional field writes the halt-on-reset request bit for all
+            currently selected harts.
+            When set to 1, each selected hart will halt upon the next deassertion
+            of its reset. The halt-on-reset request bit is not automatically
+            cleared. The debugger must write to \Fclrresethaltreq to clear it.
+
+            Writes apply to the new value of \Fhartsel and \Fhasel.
+
+            If \Fhasresethaltreq is 0, this field is not implemented.
+  */
+  val setresethaltreq = Bool()
+
+  /* This optional field clears the halt-on-reset request bit for all
+            currently selected harts.
+
+            Writes apply to the new value of \Fhartsel and \Fhasel.
+  */
+  val clrresethaltreq = Bool()
 
   /* This bit controls the reset signal from the DM to the rest of the
             system. The signal should reset every part of the system, including
@@ -817,13 +828,19 @@ class SBCSFields extends Bundle {
             While this field is non-zero, no more system bus accesses can be
             initiated by the debug module.
 
+            An implementation may report "Other" (7) for any error condition.
+
             0: There was no bus error.
 
             1: There was a timeout.
 
             2: A bad address was accessed.
 
-            3: There was some other error (eg. alignment).
+            3: There was an alignment error.
+
+            4: An access of unsupported size was requested.
+
+            7: Other.
   */
   val sberror = UInt(3.W)
 
