@@ -331,7 +331,6 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
         DMCONTROLNxt.ndmreset     := DMCONTROLWrData.ndmreset
         DMCONTROLNxt.hartsello    := DMCONTROLWrData.hartsello
         DMCONTROLNxt.haltreq      := DMCONTROLWrData.haltreq
-        DMCONTROLNxt.resethaltreq := DMCONTROLWrData.resethaltreq
         DMCONTROLNxt.resumereq    := DMCONTROLWrData.resumereq
         DMCONTROLNxt.ackhavereset := DMCONTROLWrData.ackhavereset
       }
@@ -361,12 +360,12 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
     debugIntNxt := debugIntRegs
 
     val onResetDebugIntNxt = Wire(init = Vec.fill(nComponents){false.B})
-    val onResetDebugIntRegs = Wire(init = Vec(AsyncResetReg(updateData = onResetDebugIntNxt.asUInt,
+    val onResetDebugIntReg = Wire(init = Vec(AsyncResetReg(updateData = onResetDebugIntNxt.asUInt,
       resetData = 0,
       enable = true.B,
       name = "onResetDebugInterrupts").toBools))
 
-    onResetDebugIntNxt := onResetDebugIntRegs
+    onResetDebugIntNxt := onResetDebugIntReg
 
     val (intnode_out, _) = intnode.out.unzip
     for (component <- 0 until nComponents) {
@@ -388,7 +387,12 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
       }. otherwise {
         when (DMCONTROLWrEn && DMCONTROLWrData.hartsello === component.U) {
           debugIntNxt(component)        := DMCONTROLWrData.haltreq
-          onResetDebugIntNxt(component) := DMCONTROLWrData.resethaltreq
+          when (DMCONTROLWrData.setresethaltreq) {
+            onResetDebugIntNxt(component) := true.B
+          }
+          .elsewhen (DMCONTROLWrData.clrresethaltreq) {
+            onResetDebugIntNxt(component) := false.B
+          }
         }
       }
     }
@@ -398,7 +402,7 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
     io.innerCtrl.bits.resumereq    := DMCONTROLWrData.resumereq
     io.innerCtrl.bits.ackhavereset := DMCONTROLWrData.ackhavereset 
 
-    io.innerOnResetHaltReq := onResetDebugIntRegs
+    io.innerOnResetHaltReq := onResetDebugIntReg
 
     io.ctrl.ndreset := DMCONTROLReg.ndmreset
     io.ctrl.dmactive := DMCONTROLReg.dmactive
