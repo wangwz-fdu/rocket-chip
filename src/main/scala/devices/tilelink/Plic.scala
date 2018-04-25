@@ -239,7 +239,7 @@ class TLPLIC(params: PLICParams, beatBytes: Int)(implicit p: Parameters) extends
             assert(completerDev === data.extract(log2Ceil(nDevices+1)-1, 0), 
                    "completerDev should be consistent for all harts")
             completerDev := data.extract(log2Ceil(nDevices+1)-1, 0)
-            completer(i) := valid && enables(i)(completerDev)
+            completer(i) := valid
             Bool(true)
           },
           Some(RegFieldDesc(s"claim_complete_$i",
