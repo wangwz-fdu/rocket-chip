@@ -149,48 +149,63 @@ class TLPLIC(params: PLICParams, beatBytes: Int)(implicit p: Parameters) extends
       if (nPriorities > 0) Reg(Vec(nHarts, UInt(width=prioBits)))
       else Wire(init=Vec.fill(nHarts)(UInt(0)))
     val pending = Reg(init=Vec.fill(nDevices+1){Bool(false)})
-    val enables = Reg(Vec(nHarts, Vec(nDevices+1, Bool())))
+    val enables = Reg(Vec(nHarts, UInt(width = nDevices+1)))
     
     val maxDevs = Reg(Vec(nHarts, UInt(width = log2Up(pending.size))))
     val pendingUInt =  Cat(pending.reverse)
     for (hart <- 0 until nHarts) {
       val fanin = Module(new PLICFanIn(nDevices, prioBits))
       fanin.io.prio := priority
-      fanin.io.ip   := Cat(enables(hart).reverse) & pendingUInt
+      fanin.io.ip   := enables(hart) & pendingUInt
       maxDevs(hart) := fanin.io.dev
       harts(hart) := ShiftRegister(Reg(next = fanin.io.max) > Cat(UInt(1), threshold(hart)), params.intStages)
     }
 
-    def priorityRegDesc(i: Int) = if (i > 0) {
-      RegFieldDesc(s"priority_$i", s"Acting priority of interrupt source $i",
-        reset=if (nPriorities > 0) None else Some(1),
-        wrType=Some(RegFieldWrType.MODIFY))
-    } else {
-      RegFieldDesc.reserved
-    }
-    def pendingRegDesc(i: Int) = if (i > 0) {
-      RegFieldDesc(s"pending_$i", s"Set to 1 if interrupt source $i is pending, regardless of its enable or priority setting.",
-      volatile = true)
-    } else {
-      RegFieldDesc.reserved
-    }
+    def priorityRegDesc(i: Int) =
+      if (i > 0) {
+        RegFieldDesc(
+          name      = s"priority_$i",
+          desc      = s"Acting priority of interrupt source $i",
+          group     = Some("priority"),
+          groupDesc = Some("Acting priorities of each interrupt source."),
+          reset     = if (nPriorities > 0) None else Some(1))
+      } else {
+        RegFieldDesc.reserved
+      }
 
-    def priorityRegField(x: UInt, i: Int) = if (nPriorities > 0) RegField(32, x, priorityRegDesc(i)) else RegField.r(32, x, priorityRegDesc(i))
-    val priorityRegFields = Seq(PLICConsts.priorityBase -> RegFieldGroup("priority",
-      Some(s"Acting priorities of each interrupt source. Maximum legal value is ${nPriorities}. 32 bits for each interrupt source."),
-      priority.zipWithIndex.map{case (p, i) => priorityRegField(p, i)}))
-    val pendingRegFields = Seq(PLICConsts.pendingBase  -> RegFieldGroup("pending", Some("Pending Bit Array. 1 Bit for each interrupt source."),
-      pending.zipWithIndex.map{case (b, i) => RegField.r(1, b, pendingRegDesc(i))}))
+    def pendingRegDesc(i: Int) =
+      if (i > 0) {
+        RegFieldDesc(
+          name      = s"pending_$i",
+          desc      = s"Set to 1 if interrupt source $i is pending, regardless of its enable or priority setting.",
+          group     = Some("pending"),
+          groupDesc = Some("Pending Bit Array. 1 Bit for each interrupt source."),
+          volatile = true)
+      } else {
+        RegFieldDesc.reserved
+      }
 
- 
-    val enableRegFields = enables.zipWithIndex.map { case (e, i) =>
-      PLICConsts.enableBase(i) -> RegFieldGroup(s"enables_${i}", Some(s"Enable bits for each interrupt source for target $i. 1 bit for each interrupt source."),
-        e.zipWithIndex.map{case (b, j) => if (j > 0) {
-          RegField(1, b, RegFieldDesc(s"enable_${i}_${j}", s"Enable interrupt for source $j for target $i.", reset=None))
-        } else {
-          RegField(1, b, RegFieldDesc.reserved)
-        }})
-    }
+    def enableRegDesc(i: Int) =
+      if (i > 0) {
+        RegFieldDesc(
+          name      = s"enables_${i}",
+          desc      = "Set to 1 if interrupt should be enabled.",
+          group     = Some(s"enables_${i}"),
+          groupDesc = Some(s"Enable bits for each interrupt source for target $i. 1 bit for each interrupt source."))
+      } else {
+        RegFieldDesc.reserved
+      }
+
+    def priorityRegField(x: UInt, i: Int) =
+      if (nPriorities > 0) {
+        RegField(prioBits, x, priorityRegDesc(i))
+      } else {
+        RegField.r(prioBits, x, priorityRegDesc(i))
+      }
+
+    val priorityRegFields = priority.zipWithIndex.map { case (p, i) => (PLICConsts.priorityBase+4*i -> Seq(priorityRegField(p, i))) }.toList
+    val pendingRegFields = Seq(PLICConsts.pendingBase -> pending.zipWithIndex.map{case (b, i) => RegField.r(1, b, pendingRegDesc(i))})
+    val enableRegFields = enables.zipWithIndex.map { case (e, i) => (PLICConsts.enableBase(i) -> RegField.bytes(e, nDevices/8+1, Some(enableRegDesc(i)))) }.toList
 
     // When a hart reads a claim/complete register, then the
     // device which is currently its highest priority is no longer pending.
@@ -223,14 +238,23 @@ class TLPLIC(params: PLICParams, beatBytes: Int)(implicit p: Parameters) extends
        g.complete := c
     }
 
-    def thresholdRegDesc(i: Int) = RegFieldDesc(s"threshold_$i", s"Interrupt & claim threshold for target $i. Maximum value is ${nPriorities}.",
-      reset=if (nPriorities > 0) None else Some(1),
-      wrType=Some(RegFieldWrType.MODIFY))
-    def thresholdRegField(x: UInt, i: Int) = if (nPriorities > 0) RegField(32, x, thresholdRegDesc(i)) else RegField.r(32, x, thresholdRegDesc(i))
+    def thresholdRegDesc(i: Int) =
+      RegFieldDesc(
+        name = s"threshold_$i",
+        desc = s"Interrupt & claim threshold for target $i. Maximum value is ${nPriorities}.",
+        reset    = if (nPriorities > 0) None else Some(1))
+
+    def thresholdRegField(x: UInt, i: Int) =
+      if (nPriorities > 0) {
+        RegField(prioBits, x, thresholdRegDesc(i))
+      } else {
+        RegField.r(prioBits, x, thresholdRegDesc(i))
+      }
 
     val hartRegFields = Seq.tabulate(nHarts) { i =>
       PLICConsts.hartBase(i) -> Seq(
         thresholdRegField(threshold(i), i),
+        RegField(32-prioBits),
         RegField(32,
           RegReadFn { valid =>
             claimer(i) := valid
@@ -258,8 +282,6 @@ class TLPLIC(params: PLICParams, beatBytes: Int)(implicit p: Parameters) extends
 
     priority(0) := 0
     pending(0) := false
-    for (e <- enables)
-      e(0) := false
 
     if (nDevices >= 2) {
       val claimed = claimer(0) && maxDevs(0) > 0
